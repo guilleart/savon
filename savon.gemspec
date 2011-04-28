@@ -4,7 +4,7 @@ $:.unshift lib unless $:.include? lib
 require "savon/version"
 
 Gem::Specification.new do |s|
-  s.name = "savon_wsse"
+  s.name = "savon"
   s.version = Savon::Version
   s.authors = "Daniel Harrington"
   s.email = "me@rubiii.com"
