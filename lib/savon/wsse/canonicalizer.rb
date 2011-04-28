@@ -45,13 +45,14 @@ module Savon
           # work :)
           xpath.write <<-XML
             <XPath  xmlns:env="http://schemas.xmlsoap.org/soap/envelope/"
-                    xmlns:soapenv="http://schemas.xmlsoap.org/soap/envelope/"
-                    xmlns:wsse="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
-                    xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
+                    xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"
+                    xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd"
+                    xmlns:u="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd"
                     xmlns:x="http://www.w3.org/2000/09/xmldsig#"
 
                     xmlns:xsd="http://www.w3.org/2001/XMLSchema"
                     xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                    xmlns:a="http://www.w3.org/2005/08/addressing"
                     >
               (//. | //@* | //namespace::*)[ancestor-or-self::#{xpath_element_with_namespace}]
             </XPath>

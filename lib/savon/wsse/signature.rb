@@ -15,7 +15,17 @@ module Savon
       # Without a document, the document cannot be signed.
       # Generate the document once, and then set document and recall #to_xml
       attr_accessor :document
+
+      #Dynamic signed parts
+      attr_accessor :signed_parts
+
+      #Security Context token
+      attr_accessor :security_context_token
       
+      #Include certificates in the request? 
+      attr_accessor :include_certs
+
+
       ExclusiveXMLCanonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#'.freeze
       RSASHA1SignatureAlgorithm = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1'.freeze
       SHA1DigestAlgorithm = 'http://www.w3.org/2000/09/xmldsig#sha1'.freeze
@@ -25,8 +35,12 @@ module Savon
       
       SignatureNamespace = 'http://www.w3.org/2000/09/xmldsig#'.freeze
       
-      def initialize(certs = Certs.new)
+      def initialize(certs = Certs.new, options = { })
         @certs = certs
+        @signed_parts = options[:signed_parts]
+        @security_context_token = options[:security_token]
+        @include_certs = options[:include_certs]
+        @include_certs = true if @include_certs.nil?
       end
       
       def have_document?
@@ -36,7 +50,7 @@ module Savon
       # Cache "now" so that digests match...
       # TODO: figure out how we might want to expire this cache...
       def now
-        @now ||= Time.now
+        @now ||= Time.now.utc
       end
       
       def timestamp_id
@@ -46,15 +60,19 @@ module Savon
       def body_id
         @body_id ||= "Body-#{uid}".freeze
       end
-      
+
+      def to_id
+        "_1"
+      end
+
       def security_token_id
         @security_token_id ||= "SecurityToken-#{uid}".freeze
       end
       
       def body_attributes
         {
-          "xmlns:wsu" => WSUNamespace,
-          "wsu:Id" => body_id,
+          "xmlns:u" => WSUNamespace,
+          "u:Id" => body_id,
         }
       end
       
@@ -63,15 +81,15 @@ module Savon
         security.deep_merge!(binary_security_token) if certs.cert
 
         security.merge! :order! => []
-        [ "wsu:Timestamp", "wsse:BinarySecurityToken", "Signature" ].each do |key|
+        [ "u:Timestamp", "o:BinarySecurityToken", "Signature" ].each do |key|
           security[:order!] << key if security[key]
         end
 
         xml = Gyoku.xml({
-          "wsse:Security" => security,
-          :attributes! => { "wsse:Security" => {
-             'xmlns:wsse' => WSENamespace,
-             'soapenv:mustUnderstand' => "1",
+          "o:Security" => security,
+          :attributes! => { "o:Security" => {
+             'xmlns:o' => WSENamespace,
+             's:mustUnderstand' => "1",
           } },
         })
       end
@@ -80,12 +98,12 @@ module Savon
     
       def binary_security_token
         {
-          "wsse:BinarySecurityToken" => Base64.encode64(certs.cert.to_der).gsub("\n", ''),
-          :attributes! => { "wsse:BinarySecurityToken" => {
-            "wsu:Id" => security_token_id,
+          "o:BinarySecurityToken" => Base64.encode64(certs.cert.to_der).gsub("\n", ''),
+          :attributes! => { "o:BinarySecurityToken" => {
+            "u:Id" => security_token_id,
             'EncodingType' => Base64EncodingType,
             'ValueType' => X509v3ValueType,
-            "xmlns:wsu" => WSUNamespace,
+            "xmlns:u" => WSUNamespace,
           } }
         }
       end
@@ -108,14 +126,14 @@ module Savon
       def key_info
         {
           "KeyInfo" => {
-            "wsse:SecurityTokenReference" => {
-              "wsse:Reference/" => nil,
-              :attributes! => { "wsse:Reference/" => {
+            "o:SecurityTokenReference" => {
+              "o:Reference/" => nil,
+              :attributes! => { "o:Reference/" => {
                 "ValueType" => X509v3ValueType,
                 "URI" => "##{security_token_id}",
               } }
             },
-            :attributes! => { "wsse:SecurityTokenReference" => { "xmlns" => "" } },
+            :attributes! => { "o:SecurityTokenReference" => { "xmlns" => "" } },
           },
         }
       end
@@ -131,17 +149,20 @@ module Savon
           "SignedInfo" => {
             "CanonicalizationMethod/" => nil,
             "SignatureMethod/" => nil,
-            "Reference" => [
-              { "DigestValue" => timestamp_digest }.merge(signed_info_transforms).merge(signed_info_digest_method),
-              { "DigestValue" => body_digest }.merge(signed_info_transforms).merge(signed_info_digest_method),
-            ],
+            "Reference" => reference_signed_parts,
             :attributes! => {
               "CanonicalizationMethod/" => { "Algorithm" => ExclusiveXMLCanonicalizationAlgorithm },
               "SignatureMethod/" => { "Algorithm" => RSASHA1SignatureAlgorithm },
-              "Reference" => { "URI" => ["##{timestamp_id}", "##{body_id}"] },
+              "Reference" => { "URI" => ["##{timestamp_id}", "##{to_id}"] },
             },
             :order! => [ "CanonicalizationMethod/", "SignatureMethod/", "Reference" ],
           },
+        }
+      end
+
+      def reference_signed_parts
+        @signed_parts.map{ |part|
+          signed_info_transforms.merge(signed_info_digest_method).merge({ "DigestValue" => xml_digest(part)})
         }
       end
     
@@ -151,12 +172,12 @@ module Savon
       # TODO: Allow for configurability of these timestamps.
       def timestamp
         {
-          "wsu:Timestamp" => {
-            "wsu:Created" => now.xs_datetime,
-            "wsu:Expires" => (now + 60 * 5).xs_datetime,
-            :order! => ["wsu:Created", "wsu:Expires"],
+          "u:Timestamp" => {
+            "u:Created" => now.xs_datetime,
+            "u:Expires" => (now + 60 * 5).xs_datetime,
+            :order! => ["u:Created", "u:Expires"],
           },
-          :attributes! => { "wsu:Timestamp" => { "wsu:Id" => timestamp_id, "xmlns:wsu" => WSUNamespace } },
+          :attributes! => { "u:Timestamp" => { "u:Id" => timestamp_id, "xmlns:u" => WSUNamespace } },
         }
       end
       
@@ -167,14 +188,6 @@ module Savon
         Base64.encode64(signature).gsub("\n", '') # TODO: DRY calls to Base64.encode64(...).gsub("\n", '')
       end
       
-      def timestamp_digest
-        xml_digest('wsu:Timestamp')
-      end
-      
-      def body_digest
-        xml_digest("soapenv:Body")
-      end
-
       def canonicalize(xml_element)
         canonicalized_element = Canonicalizer.canonicalize(document, xml_element)
         raise EmptyCanonicalization, "Expected to canonicalize #{xml_element.inspect} within: #{document}" if canonicalized_element.blank?

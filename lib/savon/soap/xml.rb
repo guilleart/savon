@@ -83,7 +83,7 @@ module Savon
 
       # Returns the SOAP envelope namespace. Defaults to :env.
       def env_namespace
-        @env_namespace ||= :soapenv
+        @env_namespace ||= :s
       end
 
       # Sets the +namespaces+ Hash.
@@ -186,6 +186,7 @@ module Savon
 
       # Returns the SOAP header as an XML String.
       def header_for_xml
+        return header.to_s + wsse_header unless header.kind_of? Hash
         @header_for_xml ||= Gyoku.xml(header) + wsse_header
       end
 

@@ -29,12 +29,12 @@ module Savon
       end
       
       def signature_value
-        element = element_for_xpath("//wsse:Security/Signature/SignatureValue")
+        element = element_for_xpath("//o:Security/Signature/SignatureValue")
         element ? element.text : ""
       end
       
       def certificate
-        certificate_value = element_for_xpath("//wsse:Security/wsse:BinarySecurityToken").text.strip
+        certificate_value = element_for_xpath("//o:Security/o:BinarySecurityToken").text.strip
         OpenSSL::X509::Certificate.new Base64.decode64(certificate_value)
       end
       
@@ -53,9 +53,9 @@ module Savon
     private
 
       def verify
-        REXML::XPath.each(document, "//wsse:Security/Signature/SignedInfo/Reference") do |ref|
+        REXML::XPath.each(document, "//o:Security/Signature/SignedInfo/Reference") do |ref|
           element_id = ref.attributes["URI"][1..-1] # strip leading '#'
-          element = element_for_xpath(%(//*[@wsu:Id="#{element_id}"]))
+          element = element_for_xpath(%(//*[@u:Id="#{element_id}"]))
           raise InvalidDigest, "Invalid Digest for #{element_id}" unless supplied_digest(element) == generate_digest(element)
         end
 
@@ -78,11 +78,11 @@ module Savon
       end
       
       def signed_info
-        REXML::XPath.first(document, "//wsse:Security/Signature/SignedInfo")
+        REXML::XPath.first(document, "//o:Security/Signature/SignedInfo")
       end
 
       def find_digest_value(id)
-        REXML::XPath.first(document, %(//wsse:Security/Signature/SignedInfo/Reference[@URI="##{id}"]/DigestValue)).text
+        REXML::XPath.first(document, %(//o:Security/Signature/SignedInfo/Reference[@URI="##{id}"]/DigestValue)).text
       end
       
       def digest(string)
