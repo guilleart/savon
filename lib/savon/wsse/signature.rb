@@ -20,7 +20,7 @@ module Savon
       attr_accessor :signed_parts
 
       #Security Context token
-      attr_accessor :security_context_token
+      attr_accessor :sct
       
       #Include certificates in the request? 
       attr_accessor :include_certs
@@ -28,9 +28,12 @@ module Savon
 
       ExclusiveXMLCanonicalizationAlgorithm = 'http://www.w3.org/2001/10/xml-exc-c14n#'.freeze
       RSASHA1SignatureAlgorithm = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1'.freeze
+      HMACSignatureAlgorithm = 'http://www.w3.org/2000/09/xmldsig#hmac-sha1'.freeze
+
       SHA1DigestAlgorithm = 'http://www.w3.org/2000/09/xmldsig#sha1'.freeze
       
       X509v3ValueType = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-x509-token-profile-1.0#X509v3'.freeze
+      SCTValuetype = 'http://schemas.xmlsoap.org/ws/2005/02/sc/sct'.freeze
       Base64EncodingType = 'http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-soap-message-security-1.0#Base64Binary'.freeze
       
       SignatureNamespace = 'http://www.w3.org/2000/09/xmldsig#'.freeze
@@ -38,7 +41,7 @@ module Savon
       def initialize(certs = Certs.new, options = { })
         @certs = certs
         @signed_parts = options[:signed_parts]
-        @security_context_token = options[:security_token]
+        @sct = Nokogiri::XML(options[:security_token]) if options[:security_token]
         @include_certs = options[:include_certs]
         @include_certs = true if @include_certs.nil?
       end
@@ -78,7 +81,7 @@ module Savon
       
       def to_xml
         security = {}.deep_merge(timestamp).deep_merge(signature)
-        security.deep_merge!(binary_security_token) if certs.cert
+        security.deep_merge!(binary_security_token) if certs.cert && @include_certs
 
         security.merge! :order! => []
         [ "u:Timestamp", "o:BinarySecurityToken", "Signature" ].each do |key|
@@ -92,6 +95,15 @@ module Savon
              's:mustUnderstand' => "1",
           } },
         })
+        xml = add_security_context_token(xml) if @sct
+        xml
+      end
+
+      def add_security_context_token(xml)
+        doc = Nokogiri::XML(xml)
+        timestamp_node = doc.at_xpath('//u:Timestamp', "u" => "http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd")
+        timestamp_node.add_next_sibling(@sct.child.to_xml)
+        return doc.child.to_xml
       end
       
     private
@@ -124,13 +136,15 @@ module Savon
       end
     
       def key_info
+        value_type = @sct.nil? ? X509v3ValueType : SCTValuetype
+        security_token = @sct.nil? ? security_token_id : @sct.child["Id"]
         {
           "KeyInfo" => {
             "o:SecurityTokenReference" => {
               "o:Reference/" => nil,
               :attributes! => { "o:Reference/" => {
-                "ValueType" => X509v3ValueType,
-                "URI" => "##{security_token_id}",
+                "ValueType" => value_type,
+                "URI" => "##{security_token}",
               } }
             },
             :attributes! => { "o:SecurityTokenReference" => { "xmlns" => "" } },
@@ -145,6 +159,7 @@ module Savon
       end
     
       def signed_info
+        signature_method = @sct.nil? ? RSASHA1SignatureAlgorithm : HMACSignatureAlgorithm
         {
           "SignedInfo" => {
             "CanonicalizationMethod/" => nil,
@@ -152,7 +167,7 @@ module Savon
             "Reference" => reference_signed_parts,
             :attributes! => {
               "CanonicalizationMethod/" => { "Algorithm" => ExclusiveXMLCanonicalizationAlgorithm },
-              "SignatureMethod/" => { "Algorithm" => RSASHA1SignatureAlgorithm },
+              "SignatureMethod/" => { "Algorithm" => signature_method },
               "Reference" => { "URI" => ["##{timestamp_id}", "##{to_id}"] },
             },
             :order! => [ "CanonicalizationMethod/", "SignatureMethod/", "Reference" ],
@@ -184,7 +199,12 @@ module Savon
       def the_signature
         raise MissingCertificate, "Expected a private_key for signing" unless certs.private_key
         xml = canonicalize("SignedInfo")
-        signature = certs.private_key.sign(OpenSSL::Digest::SHA1.new, xml)
+        if @sct
+          signature = OpenSSL::HMAC.digest('sha1', certs.cert.to_der, xml)
+        else
+          signature = certs.private_key.sign(OpenSSL::Digest::SHA1.new, xml)
+        end
+        breakpoint
         Base64.encode64(signature).gsub("\n", '') # TODO: DRY calls to Base64.encode64(...).gsub("\n", '')
       end
       
